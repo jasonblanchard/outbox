@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 )
 
@@ -32,7 +33,7 @@ func rowsToRecords(rows *sql.Rows) []Record {
 }
 
 func getPendingRecords(db *sql.DB, bufferSize int) []Record {
-	rows, err := db.Query("SELECT * FROM messages WHERE status = 'pending' LIMIT $1", bufferSize)
+	rows, err := db.Query("SELECT * FROM messages WHERE status = 'pending' ORDER BY id LIMIT $1", bufferSize)
 	if err != nil {
 		panic(fmt.Sprintf("Error reading records: %s", err))
 	}
@@ -40,12 +41,16 @@ func getPendingRecords(db *sql.DB, bufferSize int) []Record {
 	return rowsToRecords(rows)
 }
 
-func setRecordsToInFlight(records []Record, db *sql.DB) {
+func setRecordsToInFlight(db *sql.DB, records []Record) {
 	ids := make([]int, len(records))
 	for i, record := range records {
 		ids[i] = record.id
 	}
-	// TODO: SQL to update all records where id is in ids
+
+	_, err := db.Query("UPDATE messages SET status = 'inflight' WHERE id = ANY($1)", pq.Array(ids))
+	if err != nil {
+		panic(fmt.Sprintf("Error updaing messages: %s", err))
+	}
 }
 
 func main() {
@@ -71,13 +76,21 @@ func main() {
 		}
 
 		if (len(buffer) > 0) && (shouldSendToDispatch == true) {
-			// TODO For each message, set status == inflight
+			setRecordsToInFlight(db, buffer)
+
 			log.Println("Sending to dispatch")
 			go func() {
 				records := <-dispatch
 				log.Printf("Dispatching %d messages", len(records))
 				// TODO For each, do the NATS publish
-				// On success, update record in DB to status = sent
+				for i := 0; i < len(records); i++ {
+					// On success, update record in DB to status = sent
+					log.Printf("Dispatching message...")
+					_, err = db.Query("UPDATE messages SET status = 'sent' WHERE id = $1", records[i].id)
+					if err != nil {
+						panic(fmt.Sprintf("Error updateing messages: %s", err))
+					}
+				}
 				time.Sleep(3 * time.Second)
 				dispatchDoneNotifier <- true
 			}()
