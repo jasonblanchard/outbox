@@ -53,6 +53,13 @@ func setRecordsToInFlight(db *sql.DB, records []Record) {
 	}
 }
 
+func updateMessageToSend(db *sql.DB, id int) {
+	_, err := db.Query("UPDATE messages SET status = 'sent' WHERE id = $1", id)
+	if err != nil {
+		panic(fmt.Sprintf("Error updateing messages: %s", err))
+	}
+}
+
 func main() {
 	pollRate := 2 * time.Second
 	bufferSize := 5
@@ -82,15 +89,13 @@ func main() {
 			go func() {
 				records := <-dispatch
 				log.Printf("Dispatching %d messages", len(records))
-				// TODO For each, do the NATS publish
+
 				for i := 0; i < len(records); i++ {
-					// On success, update record in DB to status = sent
-					log.Printf("Dispatching message...")
-					_, err = db.Query("UPDATE messages SET status = 'sent' WHERE id = $1", records[i].id)
-					if err != nil {
-						panic(fmt.Sprintf("Error updateing messages: %s", err))
-					}
+					// TODO: NATS publish
+					log.Printf("Dispatching message %d", records[i].id)
+					updateMessageToSend(db, records[i].id)
 				}
+
 				time.Sleep(3 * time.Second)
 				dispatchDoneNotifier <- true
 			}()
