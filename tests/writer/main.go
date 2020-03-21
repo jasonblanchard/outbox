@@ -10,7 +10,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func cmd_read(db *sql.DB) {
+func read(db *sql.DB) {
 	rows, err := db.Query("SELECT * FROM messages")
 	if err != nil {
 		log.Fatal(err)
@@ -19,27 +19,28 @@ func cmd_read(db *sql.DB) {
 	var (
 		id      int
 		status  string
+		topic   string
 		payload string
 	)
 
 	defer rows.Close()
 	for rows.Next() {
-		err := rows.Scan(&id, &status, &payload)
+		err := rows.Scan(&id, &status, &topic, &payload)
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Println(id, "|", status, "|", payload)
+		log.Println(id, "|", status, "|", topic, "|", payload)
 	}
 }
 
-func cmd_write(db *sql.DB) {
-	_, err := db.Query("INSERT INTO messages (payload) VALUES ($1)", fmt.Sprintf("hello %s", time.Now().UTC().String()))
+func write(db *sql.DB) {
+	_, err := db.Query("INSERT INTO messages (topic, payload) VALUES ('foo', $1)", fmt.Sprintf("hello %s", time.Now().UTC().String()))
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-func cmd_clean(db *sql.DB) {
+func clean(db *sql.DB) {
 	_, err := db.Query("DELETE FROM messages")
 	if err != nil {
 		log.Fatal(err)
@@ -64,13 +65,13 @@ func main() {
 
 	switch op {
 	case "read":
-		cmd_read(db)
+		read(db)
 	case "write":
-		cmd_write(db)
+		write(db)
 	case "clean":
-		cmd_clean(db)
+		clean(db)
 	default:
-		cmd_read(db)
+		read(db)
 	}
 
 	log.Print("== Done ==")
