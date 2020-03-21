@@ -17,13 +17,36 @@ type Record struct {
 	payload string
 }
 
+func rowsToRecords(rows *sql.Rows) []Record {
+	buffer := make([]Record, 0)
+	for rows.Next() {
+		record := Record{}
+		err := rows.Scan(&record.id, &record.status, &record.topic, &record.payload)
+		if err != nil {
+			panic(fmt.Sprintf("Error scanning row: %s", err))
+		}
+
+		buffer = append(buffer, record)
+	}
+	return buffer
+}
+
+func getPendingRecords(db *sql.DB, bufferSize int) []Record {
+	rows, err := db.Query("SELECT * FROM messages WHERE status = 'pending' LIMIT $1", bufferSize)
+	if err != nil {
+		panic(fmt.Sprintf("Error reading records: %s", err))
+	}
+	defer rows.Close()
+	return rowsToRecords(rows)
+}
+
 func main() {
 	pollRate := 2 * time.Second
 	bufferSize := 5
 	storeConnStr := "postgres://outbox:outbox@localhost:5432/outbox_test?sslmode=disable"
 	buffer := make([]Record, 0)
 	dispatch := make(chan []Record, 5)
-	dispatchDoneNotifier := make(chan bool, 1)
+	dispatchDoneNotifier := make(chan bool)
 	shouldSendToDispatch := true
 
 	db, err := sql.Open("postgres", storeConnStr)
@@ -32,11 +55,11 @@ func main() {
 	}
 
 	go func() {
-		dispatchDoneNotifier <- false
 		records := <-dispatch
 		log.Printf("Dispatching %d messages", len(records))
 		// TODO For each, do the NATS publish
 		// On success, update record in DB to status = sent
+		time.Sleep(1 * time.Second)
 		dispatchDoneNotifier <- true
 	}()
 
@@ -44,30 +67,23 @@ func main() {
 		if len(buffer) == 0 {
 			log.Println("Hydrating buffer")
 
-			rows, err := db.Query("SELECT * FROM messages WHERE status = 'pending' LIMIT $1", bufferSize)
-			if err != nil {
-				panic(fmt.Sprintf("Error reading records: %s", err))
-			}
+			buffer = getPendingRecords(db, bufferSize)
 
-			for rows.Next() {
-				record := Record{}
-				err := rows.Scan(&record.id, &record.status, &record.topic, &record.payload)
-				if err != nil {
-					panic(fmt.Sprintf("Error scanning row: %s", err))
-				}
-
-				buffer = append(buffer, record)
-			}
-			rows.Close()
-
-			log.Println(len(buffer))
+			log.Printf("%d records in buffer", len(buffer))
 
 			if shouldSendToDispatch {
 				// TODO For each message, set status == inflight
 				log.Println("Sending to dispatch")
 				dispatch <- buffer
 				buffer = make([]Record, 0)
-				shouldSendToDispatch = false // TODO: Update in other channel
+				shouldSendToDispatch = false
+			}
+		} else if (len(buffer) > 0) && (shouldSendToDispatch == false) {
+			log.Println("Buffer full but dispatcher blocked, waiting...")
+			select {
+			case result := <-dispatchDoneNotifier:
+				log.Println("Buffer unblocked, continuing")
+				shouldSendToDispatch = result
 			}
 		} else {
 			log.Printf("Message record buffer full, sleeping for %d", pollRate)
