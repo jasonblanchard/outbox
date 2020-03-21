@@ -45,7 +45,7 @@ func main() {
 	bufferSize := 5
 	storeConnStr := "postgres://outbox:outbox@localhost:5432/outbox_test?sslmode=disable"
 	buffer := make([]Record, 0)
-	dispatch := make(chan []Record, 5)
+	dispatch := make(chan []Record, bufferSize)
 	dispatchDoneNotifier := make(chan bool)
 	shouldSendToDispatch := true
 
@@ -54,25 +54,25 @@ func main() {
 		panic(fmt.Sprintf("Cannot connect to store: %s", err))
 	}
 
-	go func() {
-		records := <-dispatch
-		log.Printf("Dispatching %d messages", len(records))
-		// TODO For each, do the NATS publish
-		// On success, update record in DB to status = sent
-		time.Sleep(1 * time.Second)
-		dispatchDoneNotifier <- true
-	}()
-
 	for {
+		log.Printf("%d records in buffer", len(buffer))
+
 		if len(buffer) == 0 {
 			log.Println("Hydrating buffer")
 			buffer = getPendingRecords(db, bufferSize)
-			log.Printf("%d records in buffer", len(buffer))
 		}
 
 		if (len(buffer) > 0) && (shouldSendToDispatch == true) {
 			// TODO For each message, set status == inflight
 			log.Println("Sending to dispatch")
+			go func() {
+				records := <-dispatch
+				log.Printf("Dispatching %d messages", len(records))
+				// TODO For each, do the NATS publish
+				// On success, update record in DB to status = sent
+				time.Sleep(3 * time.Second)
+				dispatchDoneNotifier <- true
+			}()
 			dispatch <- buffer
 			buffer = make([]Record, 0)
 			shouldSendToDispatch = false
@@ -85,37 +85,12 @@ func main() {
 			case result := <-dispatchDoneNotifier:
 				log.Println("Buffer unblocked, continuing")
 				shouldSendToDispatch = result
+				continue
 			}
 		}
 
 		log.Printf("Message record buffer full, sleeping for %d", pollRate)
 		time.Sleep(pollRate)
-
-		// if len(buffer) == 0 {
-		// 	log.Println("Hydrating buffer")
-
-		// 	buffer = getPendingRecords(db, bufferSize)
-
-		// 	log.Printf("%d records in buffer", len(buffer))
-
-		// 	if shouldSendToDispatch {
-		// 		// TODO For each message, set status == inflight
-		// 		log.Println("Sending to dispatch")
-		// 		dispatch <- buffer
-		// 		buffer = make([]Record, 0)
-		// 		shouldSendToDispatch = false
-		// 	}
-		// } else if (len(buffer) > 0) && (shouldSendToDispatch == false) {
-		// 	log.Println("Buffer full but dispatcher blocked, waiting...")
-		// 	select {
-		// 	case result := <-dispatchDoneNotifier:
-		// 		log.Println("Buffer unblocked, continuing")
-		// 		shouldSendToDispatch = result
-		// 	}
-		// } else {
-		// 	log.Printf("Message record buffer full, sleeping for %d", pollRate)
-		// 	time.Sleep(pollRate)
-		// }
 	}
 
 	// Dispatcher channel, for each message record
