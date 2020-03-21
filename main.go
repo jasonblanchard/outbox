@@ -40,6 +40,14 @@ func getPendingRecords(db *sql.DB, bufferSize int) []Record {
 	return rowsToRecords(rows)
 }
 
+func setRecordsToInFlight(records []Record, db *sql.DB) {
+	ids := make([]int, len(records))
+	for i, record := range records {
+		ids[i] = record.id
+	}
+	// TODO: SQL to update all records where id is in ids
+}
+
 func main() {
 	pollRate := 2 * time.Second
 	bufferSize := 5
