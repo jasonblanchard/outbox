@@ -66,29 +66,56 @@ func main() {
 	for {
 		if len(buffer) == 0 {
 			log.Println("Hydrating buffer")
-
 			buffer = getPendingRecords(db, bufferSize)
-
 			log.Printf("%d records in buffer", len(buffer))
+		}
 
-			if shouldSendToDispatch {
-				// TODO For each message, set status == inflight
-				log.Println("Sending to dispatch")
-				dispatch <- buffer
-				buffer = make([]Record, 0)
-				shouldSendToDispatch = false
-			}
-		} else if (len(buffer) > 0) && (shouldSendToDispatch == false) {
+		if (len(buffer) > 0) && (shouldSendToDispatch == true) {
+			// TODO For each message, set status == inflight
+			log.Println("Sending to dispatch")
+			dispatch <- buffer
+			buffer = make([]Record, 0)
+			shouldSendToDispatch = false
+			continue
+		}
+
+		if (len(buffer) > 0) && (shouldSendToDispatch == false) {
 			log.Println("Buffer full but dispatcher blocked, waiting...")
 			select {
 			case result := <-dispatchDoneNotifier:
 				log.Println("Buffer unblocked, continuing")
 				shouldSendToDispatch = result
 			}
-		} else {
-			log.Printf("Message record buffer full, sleeping for %d", pollRate)
-			time.Sleep(pollRate)
 		}
+
+		log.Printf("Message record buffer full, sleeping for %d", pollRate)
+		time.Sleep(pollRate)
+
+		// if len(buffer) == 0 {
+		// 	log.Println("Hydrating buffer")
+
+		// 	buffer = getPendingRecords(db, bufferSize)
+
+		// 	log.Printf("%d records in buffer", len(buffer))
+
+		// 	if shouldSendToDispatch {
+		// 		// TODO For each message, set status == inflight
+		// 		log.Println("Sending to dispatch")
+		// 		dispatch <- buffer
+		// 		buffer = make([]Record, 0)
+		// 		shouldSendToDispatch = false
+		// 	}
+		// } else if (len(buffer) > 0) && (shouldSendToDispatch == false) {
+		// 	log.Println("Buffer full but dispatcher blocked, waiting...")
+		// 	select {
+		// 	case result := <-dispatchDoneNotifier:
+		// 		log.Println("Buffer unblocked, continuing")
+		// 		shouldSendToDispatch = result
+		// 	}
+		// } else {
+		// 	log.Printf("Message record buffer full, sleeping for %d", pollRate)
+		// 	time.Sleep(pollRate)
+		// }
 	}
 
 	// Dispatcher channel, for each message record
