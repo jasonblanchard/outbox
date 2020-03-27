@@ -2,20 +2,22 @@ package main
 
 import (
 	"database/sql"
+	"flag"
 	"fmt"
-	"log"
 	"time"
 
+	logger "./logger"
 	"github.com/lib/pq"
 	_ "github.com/lib/pq"
+	"github.com/nats-io/nats.go"
 )
 
-// Record TODO
+// Record Represents the message we want to dispatch
 type Record struct {
 	id      int
 	status  string
 	topic   string
-	payload string
+	payload []byte
 }
 
 func rowsToRecords(rows *sql.Rows) []Record {
@@ -60,45 +62,75 @@ func updateMessageToSend(db *sql.DB, id int) {
 	}
 }
 
+func handleDispatch(logger logger.Logger, db *sql.DB, nc *nats.Conn, dispatch chan []Record, dispatchDoneNotifier chan bool) {
+	records := <-dispatch
+	logger.Debugf("Dispatching %d messages", len(records))
+
+	for i := 0; i < len(records); i++ {
+		// TODO: NATS publish
+		record := records[i]
+		logger.Debugf("Dispatching message %d", records[i].id)
+		nc.Publish(record.topic, record.payload)
+		updateMessageToSend(db, records[i].id)
+	}
+
+	// TODO: Handle error
+	// update remaining messages back to store with status == pending
+	// Return error status to main thread
+	// Have main thread drop all messages and start over
+	// Should we keep track of failure state? dl it? skip after n tries?
+
+	// time.Sleep(3 * time.Second)
+	dispatchDoneNotifier <- true
+}
+
 func main() {
+	verbose := flag.Bool("verbose", false, "Turn on log levels")
+	flag.Parse()
+
+	loglevel := "info"
+	if *verbose == true {
+		loglevel = "debug"
+	}
+	logger := logger.New(loglevel)
 	pollRate := 2 * time.Second
 	bufferSize := 5
 	storeConnStr := "postgres://outbox:outbox@localhost:5432/outbox_test?sslmode=disable"
+	natsConnStr := nats.DefaultURL
 	buffer := make([]Record, 0)
 	dispatch := make(chan []Record, bufferSize)
 	dispatchDoneNotifier := make(chan bool)
 	shouldSendToDispatch := true
 
+	logger.Info("Initializing...")
+
 	db, err := sql.Open("postgres", storeConnStr)
 	if err != nil {
 		panic(fmt.Sprintf("Cannot connect to store: %s", err))
 	}
+	logger.Infof("Connected to Postgres")
 
+	nc, err := nats.Connect(natsConnStr)
+	if err != nil {
+		panic(fmt.Sprintf("Cannot connect to Nats: %s", err))
+	}
+	logger.Info("Connected to NATS")
+
+	logger.Info("Starting poll loop")
 	for {
-		log.Printf("%d records in buffer", len(buffer))
+		logger.Debugf("%d records in buffer", len(buffer))
 
 		if len(buffer) == 0 {
-			log.Println("Hydrating buffer")
+			logger.Debug("Hydrating buffer")
 			buffer = getPendingRecords(db, bufferSize)
 		}
 
+		// TODO: Change to switch since these are mutually exclusive?
 		if (len(buffer) > 0) && (shouldSendToDispatch == true) {
 			setRecordsToInFlight(db, buffer)
 
-			log.Println("Sending to dispatch")
-			go func() {
-				records := <-dispatch
-				log.Printf("Dispatching %d messages", len(records))
-
-				for i := 0; i < len(records); i++ {
-					// TODO: NATS publish
-					log.Printf("Dispatching message %d", records[i].id)
-					updateMessageToSend(db, records[i].id)
-				}
-
-				time.Sleep(3 * time.Second)
-				dispatchDoneNotifier <- true
-			}()
+			logger.Debug("Sending to dispatch")
+			go handleDispatch(logger, db, nc, dispatch, dispatchDoneNotifier)
 			dispatch <- buffer
 			buffer = make([]Record, 0)
 			shouldSendToDispatch = false
@@ -106,22 +138,16 @@ func main() {
 		}
 
 		if (len(buffer) > 0) && (shouldSendToDispatch == false) {
-			log.Println("Buffer full but dispatcher blocked, waiting...")
+			logger.Debug("Buffer full but dispatcher blocked, waiting...")
 			select {
 			case result := <-dispatchDoneNotifier:
-				log.Println("Buffer unblocked, continuing")
+				logger.Debug("Buffer unblocked, continuing")
 				shouldSendToDispatch = result
 				continue
 			}
 		}
 
-		log.Printf("Message record buffer full, sleeping for %d", pollRate)
+		logger.Debugf("Nothing to dispatch, sleeping for %d", pollRate)
 		time.Sleep(pollRate)
 	}
-
-	// Dispatcher channel, for each message record
-	// nc.Publish topic with payload
-	// if err, update message back to store with status == pending TODO: Should we keep track of failure state? dl it? skip after n tries?
-	// if success, update message back to store with status == sent
-	// return status to main thread
 }
