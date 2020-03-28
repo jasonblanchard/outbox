@@ -3,13 +3,19 @@ package nats
 import (
 	dto "../../dto"
 	logger "../../logger"
-	store "../../store"
 	"github.com/nats-io/nats.go"
 )
 
 // Broker Holds a NATS connection
 type Broker struct {
 	connection *nats.Conn
+}
+
+// Store message store
+type Store interface {
+	GetPendingMessages(limit int) ([]dto.Message, error)
+	SetMessagesToInFlight(messages []dto.Message) error
+	UpdateMessageToSent(id int) error
 }
 
 // New creates a new NATS Broker
@@ -20,7 +26,7 @@ func New(connectionString string) (Broker, error) {
 }
 
 // Publish publiches the message
-func (broker Broker) Publish(logger logger.Logger, store store.Store, dispatch chan []dto.Message, dispatchDoneNotifier chan bool) {
+func (broker Broker) Publish(logger logger.Logger, store Store, dispatch chan []dto.Message, dispatchDoneNotifier chan bool) {
 	messages := <-dispatch
 	logger.Debugf("Dispatching %d messages", len(messages))
 
