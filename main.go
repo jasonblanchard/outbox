@@ -73,7 +73,8 @@ func main() {
 
 		if len(buffer) == 0 {
 			logger.Debug("Hydrating buffer")
-			buffer, _ = store.GetPendingMessages(bufferSize)
+			buffer, err = store.GetPendingMessages(bufferSize)
+			panic("Error getting messages")
 		}
 
 		// TODO: Change to switch since these are mutually exclusive?
