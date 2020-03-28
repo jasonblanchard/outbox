@@ -12,22 +12,22 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-// Store record store
+// Store message store
 type Store interface {
-	GetPendingRecords(limit int) ([]dto.Message, error)
-	SetRecordsToInFlight(records []dto.Message) error
-	UpdateMessageToSend(id int) error
+	GetPendingMessages(limit int) ([]dto.Message, error)
+	SetMessagesToInFlight(messages []dto.Message) error
+	UpdateMessageToSent(id int) error
 }
 
 func handleDispatch(logger logger.Logger, store Store, nc *nats.Conn, dispatch chan []dto.Message, dispatchDoneNotifier chan bool) {
-	records := <-dispatch
-	logger.Debugf("Dispatching %d messages", len(records))
+	messages := <-dispatch
+	logger.Debugf("Dispatching %d messages", len(messages))
 
-	for i := 0; i < len(records); i++ {
-		record := records[i]
-		logger.Debugf("Dispatching message %d", records[i].Id)
-		nc.Publish(record.Topic, record.Payload)
-		store.UpdateMessageToSend(records[i].Id)
+	for i := 0; i < len(messages); i++ {
+		message := messages[i]
+		logger.Debugf("Dispatching message %d", messages[i].Id)
+		nc.Publish(message.Topic, message.Payload)
+		store.UpdateMessageToSent(messages[i].Id)
 	}
 
 	// TODO: Handle error
@@ -69,16 +69,16 @@ func main() {
 
 	logger.Info("Starting poll loop")
 	for {
-		logger.Debugf("%d records in buffer", len(buffer))
+		logger.Debugf("%d messages in buffer", len(buffer))
 
 		if len(buffer) == 0 {
 			logger.Debug("Hydrating buffer")
-			buffer, _ = store.GetPendingRecords(bufferSize)
+			buffer, _ = store.GetPendingMessages(bufferSize)
 		}
 
 		// TODO: Change to switch since these are mutually exclusive?
 		if (len(buffer) > 0) && (shouldSendToDispatch == true) {
-			store.SetRecordsToInFlight(buffer)
+			store.SetMessagesToInFlight(buffer)
 
 			logger.Debug("Sending to dispatch")
 			go handleDispatch(logger, store, nc, dispatch, dispatchDoneNotifier)
