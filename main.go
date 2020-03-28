@@ -39,6 +39,7 @@ func main() {
 		panic(fmt.Sprintf("Cannot connect to store: %s", err))
 	}
 
+	// TODO: Use different  roker dpending on flag
 	broker, err := natsbroker.New(natsConnStr)
 	if err != nil {
 		panic(fmt.Sprintf("Cannot connect to broker: %s", err))
