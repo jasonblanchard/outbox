@@ -67,7 +67,6 @@ func handleDispatch(logger logger.Logger, db *sql.DB, nc *nats.Conn, dispatch ch
 	logger.Debugf("Dispatching %d messages", len(records))
 
 	for i := 0; i < len(records); i++ {
-		// TODO: NATS publish
 		record := records[i]
 		logger.Debugf("Dispatching message %d", records[i].id)
 		nc.Publish(record.topic, record.payload)
@@ -80,7 +79,6 @@ func handleDispatch(logger logger.Logger, db *sql.DB, nc *nats.Conn, dispatch ch
 	// Have main thread drop all messages and start over
 	// Should we keep track of failure state? dl it? skip after n tries?
 
-	// time.Sleep(3 * time.Second)
 	dispatchDoneNotifier <- true
 }
 

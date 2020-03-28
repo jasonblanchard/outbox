@@ -11,3 +11,6 @@ migrations_down:
 
 clean_db:
 	dropdb outbox_test
+
+test:
+	go test -v ./...

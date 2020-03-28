@@ -5,47 +5,11 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
+
+	pg "./pg"
 
 	_ "github.com/lib/pq"
 )
-
-func read(db *sql.DB) {
-	rows, err := db.Query("SELECT * FROM messages")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	var (
-		id      int
-		status  string
-		topic   string
-		payload string
-	)
-
-	defer rows.Close()
-	for rows.Next() {
-		err := rows.Scan(&id, &status, &topic, &payload)
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Println(id, "|", status, "|", topic, "|", payload)
-	}
-}
-
-func write(db *sql.DB) {
-	_, err := db.Query("INSERT INTO messages (topic, payload) VALUES ('foo', $1)", fmt.Sprintf("hello %s", time.Now().UTC().String()))
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func clean(db *sql.DB) {
-	_, err := db.Query("DELETE FROM messages")
-	if err != nil {
-		log.Fatal(err)
-	}
-}
 
 func main() {
 	var op string
@@ -65,13 +29,13 @@ func main() {
 
 	switch op {
 	case "read":
-		read(db)
+		pg.Read(db)
 	case "write":
-		write(db)
+		pg.Write(db, "")
 	case "clean":
-		clean(db)
+		pg.Clean(db)
 	default:
-		read(db)
+		pg.Read(db)
 	}
 
 	log.Print("== Done ==")
