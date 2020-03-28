@@ -1,76 +1,33 @@
 package main
 
 import (
-	"database/sql"
 	"flag"
 	"fmt"
 	"time"
 
+	dto "./dto"
 	logger "./logger"
-	"github.com/lib/pq"
+	pgstore "./store/pg"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 )
 
-// Record Represents the message we want to dispatch
-type Record struct {
-	id      int
-	status  string
-	topic   string
-	payload []byte
+// Store record store
+type Store interface {
+	GetPendingRecords(limit int) ([]dto.Message, error)
+	SetRecordsToInFlight(records []dto.Message) error
+	UpdateMessageToSend(id int) error
 }
 
-func rowsToRecords(rows *sql.Rows) []Record {
-	buffer := make([]Record, 0)
-	for rows.Next() {
-		record := Record{}
-		err := rows.Scan(&record.id, &record.status, &record.topic, &record.payload)
-		if err != nil {
-			panic(fmt.Sprintf("Error scanning row: %s", err))
-		}
-
-		buffer = append(buffer, record)
-	}
-	return buffer
-}
-
-func getPendingRecords(db *sql.DB, bufferSize int) []Record {
-	rows, err := db.Query("SELECT * FROM messages WHERE status = 'pending' ORDER BY id LIMIT $1", bufferSize)
-	if err != nil {
-		panic(fmt.Sprintf("Error reading records: %s", err))
-	}
-	defer rows.Close()
-	return rowsToRecords(rows)
-}
-
-func setRecordsToInFlight(db *sql.DB, records []Record) {
-	ids := make([]int, len(records))
-	for i, record := range records {
-		ids[i] = record.id
-	}
-
-	_, err := db.Query("UPDATE messages SET status = 'inflight' WHERE id = ANY($1)", pq.Array(ids))
-	if err != nil {
-		panic(fmt.Sprintf("Error updaing messages: %s", err))
-	}
-}
-
-func updateMessageToSend(db *sql.DB, id int) {
-	_, err := db.Query("UPDATE messages SET status = 'sent' WHERE id = $1", id)
-	if err != nil {
-		panic(fmt.Sprintf("Error updateing messages: %s", err))
-	}
-}
-
-func handleDispatch(logger logger.Logger, db *sql.DB, nc *nats.Conn, dispatch chan []Record, dispatchDoneNotifier chan bool) {
+func handleDispatch(logger logger.Logger, store Store, nc *nats.Conn, dispatch chan []dto.Message, dispatchDoneNotifier chan bool) {
 	records := <-dispatch
 	logger.Debugf("Dispatching %d messages", len(records))
 
 	for i := 0; i < len(records); i++ {
 		record := records[i]
-		logger.Debugf("Dispatching message %d", records[i].id)
-		nc.Publish(record.topic, record.payload)
-		updateMessageToSend(db, records[i].id)
+		logger.Debugf("Dispatching message %d", records[i].Id)
+		nc.Publish(record.Topic, record.Payload)
+		store.UpdateMessageToSend(records[i].Id)
 	}
 
 	// TODO: Handle error
@@ -95,18 +52,14 @@ func main() {
 	bufferSize := 5
 	storeConnStr := "postgres://outbox:outbox@localhost:5432/outbox_test?sslmode=disable"
 	natsConnStr := nats.DefaultURL
-	buffer := make([]Record, 0)
-	dispatch := make(chan []Record, bufferSize)
+	buffer := make([]dto.Message, 0)
+	dispatch := make(chan []dto.Message, bufferSize)
 	dispatchDoneNotifier := make(chan bool)
 	shouldSendToDispatch := true
 
 	logger.Info("Initializing...")
 
-	db, err := sql.Open("postgres", storeConnStr)
-	if err != nil {
-		panic(fmt.Sprintf("Cannot connect to store: %s", err))
-	}
-	logger.Infof("Connected to Postgres")
+	store, err := pgstore.New(storeConnStr)
 
 	nc, err := nats.Connect(natsConnStr)
 	if err != nil {
@@ -120,17 +73,17 @@ func main() {
 
 		if len(buffer) == 0 {
 			logger.Debug("Hydrating buffer")
-			buffer = getPendingRecords(db, bufferSize)
+			buffer, _ = store.GetPendingRecords(bufferSize)
 		}
 
 		// TODO: Change to switch since these are mutually exclusive?
 		if (len(buffer) > 0) && (shouldSendToDispatch == true) {
-			setRecordsToInFlight(db, buffer)
+			store.SetRecordsToInFlight(buffer)
 
 			logger.Debug("Sending to dispatch")
-			go handleDispatch(logger, db, nc, dispatch, dispatchDoneNotifier)
+			go handleDispatch(logger, store, nc, dispatch, dispatchDoneNotifier)
 			dispatch <- buffer
-			buffer = make([]Record, 0)
+			buffer = make([]dto.Message, 0)
 			shouldSendToDispatch = false
 			continue
 		}
