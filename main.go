@@ -5,39 +5,13 @@ import (
 	"fmt"
 	"time"
 
+	natsbroker "./broker/nats"
 	dto "./dto"
 	logger "./logger"
 	pgstore "./store/pg"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 )
-
-// Store message store
-type Store interface {
-	GetPendingMessages(limit int) ([]dto.Message, error)
-	SetMessagesToInFlight(messages []dto.Message) error
-	UpdateMessageToSent(id int) error
-}
-
-func handleDispatch(logger logger.Logger, store Store, nc *nats.Conn, dispatch chan []dto.Message, dispatchDoneNotifier chan bool) {
-	messages := <-dispatch
-	logger.Debugf("Dispatching %d messages", len(messages))
-
-	for i := 0; i < len(messages); i++ {
-		message := messages[i]
-		logger.Debugf("Dispatching message %d", messages[i].Id)
-		nc.Publish(message.Topic, message.Payload)
-		store.UpdateMessageToSent(messages[i].Id)
-	}
-
-	// TODO: Handle error
-	// update remaining messages back to store with status == pending
-	// Return error status to main thread
-	// Have main thread drop all messages and start over
-	// Should we keep track of failure state? dl it? skip after n tries?
-
-	dispatchDoneNotifier <- true
-}
 
 func main() {
 	verbose := flag.Bool("verbose", false, "Turn on log levels")
@@ -59,13 +33,16 @@ func main() {
 
 	logger.Info("Initializing...")
 
+	// TODO: Use different store dpending on flag
 	store, err := pgstore.New(storeConnStr)
-
-	nc, err := nats.Connect(natsConnStr)
 	if err != nil {
-		panic(fmt.Sprintf("Cannot connect to Nats: %s", err))
+		panic(fmt.Sprintf("Cannot connect to store: %s", err))
 	}
-	logger.Info("Connected to NATS")
+
+	broker, err := natsbroker.New(natsConnStr)
+	if err != nil {
+		panic(fmt.Sprintf("Cannot connect to broker: %s", err))
+	}
 
 	logger.Info("Starting poll loop")
 	for {
@@ -74,7 +51,9 @@ func main() {
 		if len(buffer) == 0 {
 			logger.Debug("Hydrating buffer")
 			buffer, err = store.GetPendingMessages(bufferSize)
-			panic("Error getting messages")
+			if err != nil {
+				panic(fmt.Sprintf("Error getting messages: %s", err))
+			}
 		}
 
 		// TODO: Change to switch since these are mutually exclusive?
@@ -82,7 +61,7 @@ func main() {
 			store.SetMessagesToInFlight(buffer)
 
 			logger.Debug("Sending to dispatch")
-			go handleDispatch(logger, store, nc, dispatch, dispatchDoneNotifier)
+			go broker.Publish(logger, store, dispatch, dispatchDoneNotifier)
 			dispatch <- buffer
 			buffer = make([]dto.Message, 0)
 			shouldSendToDispatch = false
