@@ -15,6 +15,9 @@ import (
 
 func main() {
 	verbose := flag.Bool("verbose", false, "Turn on log levels")
+	pollRateFlag := flag.Int("pollRate", 2000, "Poll rate in milliseconds")
+	bufferSizeFlag := flag.Int("bufferSize", 5, "Number of records to pull each loop")
+
 	flag.Parse()
 
 	loglevel := "info"
@@ -22,19 +25,22 @@ func main() {
 		loglevel = "debug"
 	}
 	logger := logger.New(loglevel)
-	pollRate := 2 * time.Second
-	bufferSize := 5
-	storeConnStr := "postgres://outbox:outbox@localhost:5432/outbox_test?sslmode=disable"
+	pollRateMilliseconds := time.Duration(*pollRateFlag)
+	pollRate := pollRateMilliseconds * time.Millisecond
+	bufferSize := *bufferSizeFlag
+
+	postgresConnectionString := "postgres://outbox:outbox@localhost:5432/outbox_test?sslmode=disable"
 	natsConnStr := nats.DefaultURL
+
 	buffer := make([]dto.Message, 0)
 	dispatch := make(chan []dto.Message, bufferSize)
 	dispatchDoneNotifier := make(chan bool)
 	shouldSendToDispatch := true
 
-	logger.Info("Initializing...")
+	logger.Infof("Initializing with pollRate %d milliseconds, bufferSize %d \n\n", pollRateMilliseconds, bufferSize)
 
 	// TODO: Use different store dpending on flag
-	store, err := pgstore.New(storeConnStr)
+	store, err := pgstore.New(postgresConnectionString)
 	if err != nil {
 		panic(fmt.Sprintf("Cannot connect to store: %s", err))
 	}
@@ -79,7 +85,7 @@ func main() {
 			}
 		}
 
-		logger.Debugf("Nothing to dispatch, sleeping for %d", pollRate)
+		logger.Debugf("Nothing to dispatch, sleeping for %d milliseconds", pollRateMilliseconds)
 		time.Sleep(pollRate)
 	}
 }
