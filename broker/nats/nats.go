@@ -18,8 +18,8 @@ type Store interface {
 	UpdateMessageToSent(id int) error
 }
 
-// New creates a new NATS Broker
-func New(connectionString string) (Broker, error) {
+// Connect creates a new NATS broker connection
+func Connect(connectionString string) (Broker, error) {
 	nc, err := nats.Connect(connectionString)
 	broker := Broker{connection: nc}
 	return broker, err

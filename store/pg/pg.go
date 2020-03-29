@@ -17,8 +17,8 @@ type Store struct {
 	connection *sql.DB
 }
 
-// New initializes a Postgres store
-func New(connectionString string) (Store, error) {
+// Connect initializes a Postgres store connection
+func Connect(connectionString string) (Store, error) {
 	db, err := sql.Open("postgres", connectionString)
 	store := Store{connection: db}
 	return store, err
@@ -42,6 +42,9 @@ func rowsToMessages(rows *sql.Rows) []dto.Message {
 func (store Store) GetPendingMessages(limit int) ([]dto.Message, error) {
 	rows, err := store.connection.Query("SELECT * FROM messages WHERE status = 'pending' ORDER BY id LIMIT $1", limit)
 
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	return rowsToMessages(rows), err
 }
