@@ -5,25 +5,14 @@ import (
 	"fmt"
 	"time"
 
+	broker "./broker"
 	natsbroker "./broker/nats"
 	dto "./dto"
 	logger "./logger"
+	store "./store"
 	pgstore "./store/pg"
 	_ "github.com/lib/pq"
 )
-
-// Store message store
-type Store interface {
-	GetPendingMessages(limit int) ([]dto.Message, error)
-	SetMessagesToInFlight(messages []dto.Message) error
-	UpdateMessageToSent(id int) error
-}
-
-// Broker message broker
-type Broker interface {
-	// TODO: natsbroker.Store instead of local Store is weird here, the interfaces should match... am I doing it wrong?
-	Publish(logger logger.Logger, store natsbroker.Store, dispatch chan []dto.Message, dispatchDoneNotifier chan bool)
-}
 
 func main() {
 	verbose := flag.Bool("verbose", false, "Turn on log levels")
@@ -67,7 +56,7 @@ func main() {
 
 	logger.Infof("Initializing with pollRate %d milliseconds, bufferSize %d \n\n", pollRateMilliseconds, bufferSize)
 
-	var store Store
+	var store store.Store
 	var storeErr error
 	switch *storeType {
 	case "postgres":
@@ -80,7 +69,7 @@ func main() {
 		panic(fmt.Sprintf("%s is not a valid store type", *storeType))
 	}
 
-	var broker Broker
+	var broker broker.Broker
 	var brokerError error
 	switch *brokerType {
 	case "nats":
