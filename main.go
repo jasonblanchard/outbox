@@ -7,8 +7,8 @@ import (
 
 	broker "./broker"
 	natsbroker "./broker/nats"
-	dto "./dto"
 	logger "./logger"
+	poller "./poller"
 	store "./store"
 	pgstore "./store/pg"
 	_ "github.com/lib/pq"
@@ -41,25 +41,19 @@ func main() {
 	pollRate := pollRateMilliseconds * time.Millisecond
 	bufferSize := *bufferSizeFlag
 
-	var sslMode string
-	if *pgUseSsl {
-		sslMode = "enable"
-	} else {
-		sslMode = "disable"
-	}
-	postgresConnectionString := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s", *pgUser, *pgPassword, *pgHost, *pgPort, *pgTable, sslMode)
-
-	buffer := make([]dto.Message, 0)
-	dispatch := make(chan []dto.Message, bufferSize)
-	dispatchDoneNotifier := make(chan bool)
-	shouldSendToDispatch := true
-
 	logger.Infof("Initializing with pollRate %d milliseconds, bufferSize %d \n\n", pollRateMilliseconds, bufferSize)
 
 	var store store.Store
 	var storeErr error
 	switch *storeType {
 	case "postgres":
+		var sslMode string
+		if *pgUseSsl {
+			sslMode = "enable"
+		} else {
+			sslMode = "disable"
+		}
+		postgresConnectionString := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s", *pgUser, *pgPassword, *pgHost, *pgPort, *pgTable, sslMode)
 		store, storeErr = pgstore.Connect(postgresConnectionString)
 		if storeErr != nil {
 			panic(fmt.Sprintf("Cannot connect to store: %s", storeErr))
@@ -84,41 +78,5 @@ func main() {
 	}
 
 	logger.Info("Starting poll loop")
-	for {
-		logger.Debugf("%d messages in buffer", len(buffer))
-
-		if len(buffer) == 0 {
-			logger.Debug("Hydrating buffer")
-			var getPendingMessagesErr error
-			buffer, getPendingMessagesErr = store.GetPendingMessages(bufferSize)
-			if getPendingMessagesErr != nil {
-				panic(fmt.Sprintf("Error getting messages: %s", getPendingMessagesErr))
-			}
-		}
-
-		// TODO: Change to switch since these are mutually exclusive?
-		if (len(buffer) > 0) && (shouldSendToDispatch == true) {
-			store.SetMessagesToInFlight(buffer)
-
-			logger.Debug("Sending to dispatch")
-			go broker.Publish(logger, store, dispatch, dispatchDoneNotifier)
-			dispatch <- buffer
-			buffer = make([]dto.Message, 0)
-			shouldSendToDispatch = false
-			continue
-		}
-
-		if (len(buffer) > 0) && (shouldSendToDispatch == false) {
-			logger.Debug("Buffer full but dispatcher blocked, waiting...")
-			select {
-			case result := <-dispatchDoneNotifier:
-				logger.Debug("Buffer unblocked, continuing")
-				shouldSendToDispatch = result
-				continue
-			}
-		}
-
-		logger.Debugf("Nothing to dispatch, sleeping for %d milliseconds", pollRateMilliseconds)
-		time.Sleep(pollRate)
-	}
+	poller.Run(logger, store, broker, bufferSize, pollRate)
 }

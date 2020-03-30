@@ -19,23 +19,22 @@ func Connect(connectionString string) (Broker, error) {
 	return broker, err
 }
 
-// Publish publiches the message
-func (broker Broker) Publish(logger logger.Logger, store store.Store, dispatch chan []dto.Message, dispatchDoneNotifier chan bool) {
-	messages := <-dispatch
-	logger.Debugf("Dispatching %d messages", len(messages))
+// Publish publishes the message
+func (broker Broker) Publish(logger logger.Logger, store store.Store, messages chan []dto.Message, done chan bool) {
+	buffer := <-messages
+	logger.Debugf("Publishing %d messages", len(messages))
 
-	for i := 0; i < len(messages); i++ {
-		message := messages[i]
-		logger.Debugf("Dispatching message %d", messages[i].Id)
+	for i := 0; i < len(buffer); i++ {
+		message := buffer[i]
+		logger.Debugf("Publishing message %d", buffer[i].Id)
 		broker.connection.Publish(message.Topic, message.Payload)
-		store.UpdateMessageToSent(messages[i].Id)
+		store.UpdateMessageToSent(buffer[i].Id)
 	}
 
 	// TODO: Handle error
-	// update remaining messages back to store with status == pending
-	// Return error status to main thread
-	// Have main thread drop all messages and start over
+	// Update remaining messages back to store with status == pending
+	// Send error to an error to error channel (or false to done channel?)
 	// Should we keep track of failure state? dl it? skip after n tries?
 
-	dispatchDoneNotifier <- true
+	done <- true
 }
