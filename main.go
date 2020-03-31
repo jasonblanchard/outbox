@@ -3,14 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
-	"time"
 
-	broker "./broker"
-	natsbroker "./broker/nats"
-	logger "./logger"
+	configuration "./configuration"
 	poller "./poller"
-	store "./store"
-	pgstore "./store/pg"
 	_ "github.com/lib/pq"
 )
 
@@ -32,51 +27,12 @@ func main() {
 
 	flag.Parse()
 
-	loglevel := "info"
-	if *verbose == true {
-		loglevel = "debug"
-	}
-	logger := logger.New(loglevel)
-	pollRateMilliseconds := time.Duration(*pollRateFlag)
-	pollRate := pollRateMilliseconds * time.Millisecond
-	bufferSize := *bufferSizeFlag
-
-	logger.Infof("Initializing with pollRate %d milliseconds, bufferSize %d \n\n", pollRateMilliseconds, bufferSize)
-
-	var store store.Store
-	var storeErr error
-	switch *storeType {
-	case "postgres":
-		var sslMode string
-		if *pgUseSsl {
-			sslMode = "enable"
-		} else {
-			sslMode = "disable"
-		}
-		postgresConnectionString := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s", *pgUser, *pgPassword, *pgHost, *pgPort, *pgTable, sslMode)
-		store, storeErr = pgstore.Connect(postgresConnectionString)
-		if storeErr != nil {
-			panic(fmt.Sprintf("Cannot connect to store: %s", storeErr))
-		}
-		logger.Infof("Connected to store postgres://%s:[FILTERED]@%s:%s/%s?sslmode=%s", *pgUser, *pgHost, *pgPort, *pgTable, sslMode)
-	default:
-		panic(fmt.Sprintf("%s is not a valid store type", *storeType))
+	configArgs := configuration.Args{StoreType: *storeType, PgUseSsl: *pgUseSsl, PgUser: *pgUser, PgPassword: *pgPassword, PgHost: *pgHost, PgPort: *pgPort, PgTable: *pgTable, BrokerType: *brokerType, NatsHost: *natsHost, NatsPort: *natsPort, BufferSize: *bufferSizeFlag, PollRateMilliseconds: *pollRateFlag, Verbose: *verbose}
+	config, err := configuration.Initialize(configArgs)
+	if err != nil {
+		panic(fmt.Sprintf("Configuration error: %s", err))
 	}
 
-	var broker broker.Broker
-	var brokerError error
-	switch *brokerType {
-	case "nats":
-		natsConnectionString := fmt.Sprintf("nats://%s:%s", *natsHost, *natsPort)
-		broker, brokerError = natsbroker.Connect(natsConnectionString)
-		if brokerError != nil {
-			panic(fmt.Sprintf("Cannot connect to broker: %s", brokerError))
-		}
-		logger.Infof("Connected to broker %s", natsConnectionString)
-	default:
-		panic(fmt.Sprintf("%s is not a valid broker type", *brokerType))
-	}
-
-	logger.Info("Starting poll loop")
-	poller.Run(logger, store, broker, bufferSize, pollRate)
+	config.Logger.Info("Starting poll loop")
+	poller.Run(config.Logger, config.Store, config.Broker, config.BufferSize, config.PollRate)
 }
