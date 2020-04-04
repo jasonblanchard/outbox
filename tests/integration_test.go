@@ -36,7 +36,7 @@ func TestPostgresAndNATS(t *testing.T) {
 	sub, err := nc.SubscribeSync("foo")
 	results := make([]string, 3)
 	for i := range results {
-		message, err := sub.NextMsg(2 * time.Second)
+		message, err := sub.NextMsg(3 * time.Second)
 		if err != nil {
 			t.Errorf("Error getting result %d: %d", i, err)
 		}

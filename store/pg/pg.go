@@ -65,3 +65,14 @@ func (store Store) UpdateMessageToSent(id int) error {
 	_, err := store.connection.Query("UPDATE messages SET status = 'sent' WHERE id = $1", id)
 	return err
 }
+
+// UpdateMessagesToPending updates messages back to pending
+func (store Store) UpdateMessagesToPending(messages []dto.Message) error {
+	ids := make([]int, len(messages))
+	for i, message := range messages {
+		ids[i] = message.Id
+	}
+
+	_, err := store.connection.Query("UPDATE messages SET status = 'pending' WHERE id = ANY($1)", pq.Array(ids))
+	return err
+}

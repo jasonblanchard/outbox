@@ -8,5 +8,5 @@ import (
 
 // Broker message broker
 type Broker interface {
-	Publish(logger logger.Logger, store store.Store, messages chan []dto.Message, done chan bool)
+	Publish(logger logger.Logger, store store.Store, messages chan []dto.Message, done chan bool, brokerError chan error)
 }

@@ -15,6 +15,7 @@ func Run(logger logger.Logger, store store.Store, broker broker.Broker, bufferSi
 	buffer := make([]dto.Message, 0)
 	messages := make(chan []dto.Message, bufferSize)
 	brokerDone := make(chan bool)
+	brokerError := make(chan error)
 	shouldSendToBroker := true
 
 	for {
@@ -34,7 +35,7 @@ func Run(logger logger.Logger, store store.Store, broker broker.Broker, bufferSi
 			store.SetMessagesToInFlight(buffer)
 
 			logger.Debug("Sending to broker")
-			go broker.Publish(logger, store, messages, brokerDone)
+			go broker.Publish(logger, store, messages, brokerDone, brokerError)
 			messages <- buffer
 			buffer = make([]dto.Message, 0)
 			shouldSendToBroker = false
@@ -45,9 +46,10 @@ func Run(logger logger.Logger, store store.Store, broker broker.Broker, bufferSi
 			case result := <-brokerDone:
 				logger.Debug("Buffer unblocked, continuing")
 				shouldSendToBroker = result
+			case result := <-brokerError:
+				logger.Infof("Error sending message: %d", result)
+				buffer = make([]dto.Message, 0)
 			}
-			// TODO: case brokerError := <-brokerError:
-			// Drop all messages in buffer
 		default:
 			logger.Debugf("Nothing to publish, sleeping for %d milliseconds", pollRate/1000000)
 			time.Sleep(pollRate)
